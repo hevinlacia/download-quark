@@ -1,5 +1,7 @@
 __pycache__/
 *.pyc
+node_modules/
+.venv/
 .*.parts/
 .quark_history.jsonl
 *.log

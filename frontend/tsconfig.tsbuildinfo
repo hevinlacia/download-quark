@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/utils.ts","./src/components/AddTaskDialog.tsx","./src/components/SettingsDialog.tsx","./src/components/TaskCard.tsx"],"version":"5.9.3"}

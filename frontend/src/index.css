@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body { font-family: -apple-system, system-ui, "PingFang SC", sans-serif; }
+* { scrollbar-width: thin; scrollbar-color: #2a2f3a transparent; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb { background: #2a2f3a; border-radius: 3px; }
