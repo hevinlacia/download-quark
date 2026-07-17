@@ -1,4 +1,4 @@
-# download-quark
+# downloader
 
 夸克网盘大文件直链下载工具，绕过网页端强制跳客户端的限制，附带 web 控制面板（配置下载目录、网页启动下载、实时监控进度）。
 
@@ -22,7 +22,7 @@ python3 quark_monitor.py ~/下载/网盘 7788
 
 浏览器打开 `http://localhost:7788`：
 
-- **设置**：填下载目录 + 夸克 Cookie，保存（存到 `~/.config/download-quark/config.json`，Cookie 不回传前端）
+- **设置**：填下载目录 + 夸克 Cookie，保存（存到 `~/.config/downloader/config.json`，Cookie 不回传前端）
 - **新建下载**：粘贴 fid（多个用空格/换行分隔），点「开始下载」即后台启动，不阻塞面板
 - **进行中**：实时进度条 / 速度 / ETA / 完成块数
 - **历史**：已完成的下载记录
@@ -41,7 +41,7 @@ curl -s '<sort接口URL>' -H 'Cookie: <你的Cookie>' \
 
 ## 命令行方式（可选）
 
-CLI 与 web 面板共用同一份配置（`~/.config/download-quark/config.json`），Cookie/目录设一次两边通用。
+CLI 与 web 面板共用同一份配置（`~/.config/downloader/config.json`），Cookie/目录设一次两边通用。
 
 ```bash
 # 方式一：用 web 设好的配置直接下

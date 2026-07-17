@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-# quark_dl.py -- 夸克网盘直链下载器
-# 并行分块 + 断点续传 + 自动重试 + 写 .meta.json 供 web 监控读取
+# quark_dl.py -- 夸克网盘直链下载引擎
+# 可独立 CLI 使用，也可被 quark_daemon.py 作为库调用 (download_task)
 #
-# 用法:
-#   export QUARK_COOKIE='<从浏览器复制的完整 Cookie>'
+# CLI:
+#   export QUARK_COOKIE='...'
 #   python3 quark_dl.py <fid> [<fid> ...]
 #
-# 可选环境变量: CHUNK_MB(默认100) CONC(默认16) OUTDIR(默认当前目录)
+# 库调用:
+#   from quark_dl import download_task
+#   ok, name, err = download_task(fid, outdir, cookie, progress_cb=..., stop_event=...)
 import json, os, sys, time, shutil, threading, urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -33,25 +35,30 @@ OUTDIR = os.environ.get("OUTDIR") or _CFG.get("outdir") or os.getcwd()
 
 
 def die(msg):
-    print(f"❌ {msg}", file=sys.stderr); sys.exit(1)
+    print(f"❌ {msg}", file=sys.stderr)
+    sys.exit(1)
 
 
-def get_url_info(fid):
+def get_url_info(fid, cookie=None):
     """用 PC 客户端 UA 调 drive.quark.cn 取直链+文件名+大小(绕过大文件限制)。"""
+    ck = cookie or COOKIE
     data = json.dumps({"fids": [fid]}).encode()
     req = urllib.request.Request(
         "https://drive.quark.cn/1/clouddrive/file/download?pr=ucpro&fr=pc",
         data=data, method="POST",
-        headers={"User-Agent": QUARK_UA, "Content-Type": "application/json", "Cookie": COOKIE})
+        headers={"User-Agent": QUARK_UA, "Content-Type": "application/json", "Cookie": ck})
     with urllib.request.urlopen(req, timeout=30) as r:
         j = json.load(r)
     if j.get("code") != 0:
-        die(f"取直链失败 fid={fid}: {j.get('code')} {j.get('message')}")
+        raise RuntimeError(f"取直链失败 fid={fid}: {j.get('code')} {j.get('message')}")
     d = j["data"][0]
     return d["download_url"], d["file_name"], int(d["size"])
 
 
-def download_chunk(url, partpath, start, end):
+def download_chunk(url, partpath, start, end, cookie=None, ua=None):
+    """下载单个分块。支持断点续传(追加)，失败自动重试10次。"""
+    ck = cookie or COOKIE
+    u = ua or QUARK_UA
     expected = end - start + 1
     last_err = None
     for _ in range(10):
@@ -63,7 +70,7 @@ def download_chunk(url, partpath, start, end):
         rs = start + have
         try:
             req = urllib.request.Request(url, headers={
-                "User-Agent": QUARK_UA, "Cookie": COOKIE, "Range": f"bytes={rs}-{end}"})
+                "User-Agent": u, "Cookie": ck, "Range": f"bytes={rs}-{end}"})
             with urllib.request.urlopen(req, timeout=60) as r:
                 mode = "wb" if (have > 0 and r.status != 206) else ("ab" if have > 0 else "wb")
                 with open(partpath, mode) as f:
@@ -111,9 +118,10 @@ def cur_bytes(partdir, n):
     return t
 
 
-def log_history(name, size, ok, final, dt):
+def log_history(name, size, ok, final, dt, outdir=None):
+    od = outdir or OUTDIR
     try:
-        with open(os.path.join(OUTDIR, ".quark_history.jsonl"), "a") as hf:
+        with open(os.path.join(od, ".quark_history.jsonl"), "a") as hf:
             json.dump({"name": name, "size": size, "ok": ok,
                        "avg_speed": final / dt if dt > 0 else 0, "duration": dt,
                        "finished_at": time.time()}, hf)
@@ -122,30 +130,59 @@ def log_history(name, size, ok, final, dt):
         pass
 
 
-def download_one(fid):
-    url, name, size = get_url_info(fid)
-    out = os.path.join(OUTDIR, name)
-    print(f">>> {name}  {fmt(size)}  ({CHUNK_MB}MB块 ×{CONC}并发)")
-    if os.path.exists(out) and os.path.getsize(out) == size:
-        print("    已存在且完整，跳过"); return True
+def download_task(fid, outdir=None, cookie=None,
+                  progress_cb=None, stop_event=None,
+                  chunk_mb=None, conc=None):
+    """下载一个文件的完整流程，返回 (ok:bool, name:str, error:str|None)。
 
-    partdir = os.path.join(OUTDIR, "." + name + ".parts")
+    可被外部程序调用（如 quark_daemon.py），通过 progress_cb 获取进度，
+    通过 stop_event 控制停止（暂停/取消）。
+
+    Args:
+        fid: 夸克文件 fid
+        outdir: 下载目录，默认 env/config/cwd
+        cookie: 夸克 Cookie，默认 env/config
+        progress_cb: fn(downloaded, total, speed, pct, done_chunks, nchunks)
+        stop_event: threading.Event，设置后优雅停止
+        chunk_mb: 每块大小 MB，默认 100
+        conc: 并发连接数，默认 16
+    """
+    ck = cookie or os.environ.get("QUARK_COOKIE") or _CFG.get("cookie", "") or COOKIE
+    od = outdir or os.environ.get("OUTDIR") or _CFG.get("outdir") or OUTDIR
+    cm = chunk_mb or int(os.environ.get("CHUNK_MB", "100"))
+    cn = conc or int(os.environ.get("CONC", "16"))
+
+    if not ck:
+        return False, "?", "未设置 Cookie"
+
+    url, name, size = get_url_info(fid, cookie=ck)
+    out = os.path.join(od, name)
+    print(f">>> {name}  {fmt(size)}  ({cm}MB块 ×{cn}并发)")
+
+    if os.path.exists(out) and os.path.getsize(out) == size:
+        print("    已存在且完整，跳过")
+        if progress_cb:
+            progress_cb(size, size, 0, 100, 0, 0)
+        return True, name, None
+
+    partdir = os.path.join(od, "." + name + ".parts")
     os.makedirs(partdir, exist_ok=True)
-    chunk = CHUNK_MB * 1024 * 1024
+    chunk = cm * 1024 * 1024
     nchunks = (size + chunk - 1) // chunk
     jobs = [(i, i * chunk, min(i * chunk + chunk - 1, size - 1)) for i in range(nchunks)]
 
-    # 写元信息供 web 监控读取
     t0 = time.time()
     try:
         with open(os.path.join(partdir, ".meta.json"), "w") as mf:
             json.dump({"name": name, "size": size, "nchunks": nchunks,
-                       "chunk_mb": CHUNK_MB, "started": t0}, mf)
+                       "chunk_mb": cm, "started": t0}, mf)
     except Exception:
         pass
 
-    stop = threading.Event()
+    # stop_event -- 如果外部没传就用内部只读的(永不触发)
+    stop = stop_event or threading.Event()
     done = [0]
+    failed = [None]
 
     def monitor():
         last, lt = cur_bytes(partdir, nchunks), time.time()
@@ -160,25 +197,47 @@ def download_one(fid):
             print(f"\r    {bar(pct)} {pct:4.1f}% {c/1073741824:.1f}/{size/1073741824:.1f}G "
                   f"{fmt(inst)}/s 均{fmt(avg)}/s ETA {fmt_eta(eta)} {done[0]}/{nchunks}",
                   end="", flush=True)
+            if progress_cb:
+                progress_cb(c, size, inst, pct, done[0], nchunks)
 
-    mon = threading.Thread(target=monitor, daemon=True); mon.start()
-    with ThreadPoolExecutor(max_workers=CONC) as ex:
-        futs = {ex.submit(download_chunk, url, os.path.join(partdir, f"p_{i:05d}"), s, e): i
-                for i, s, e in jobs}
-        for fut in as_completed(futs):
-            try:
-                fut.result()
-            except Exception as e:
-                stop.set(); mon.join()
-                print(f"\n    ❌ 块{futs[fut]}重试10次仍失败: {e}")
-                print(f"    直链可能已过期(5-9h有效)，重跑本脚本会续传")
-                return False
-            done[0] += 1
-    stop.set(); mon.join(); print()
+    mon = threading.Thread(target=monitor, daemon=True)
+    mon.start()
 
+    try:
+        with ThreadPoolExecutor(max_workers=cn) as ex:
+            futs = {ex.submit(download_chunk, url, os.path.join(partdir, f"p_{i:05d}"), s, e, ck, QUARK_UA): i
+                    for i, s, e in jobs}
+            for fut in as_completed(futs):
+                if stop.is_set():
+                    break
+                try:
+                    fut.result()
+                except Exception as e:
+                    failed[0] = str(e)
+                    stop.set()
+                    break
+                done[0] += 1
+    finally:
+        mon.join()
+        print()
+
+    # 用户要求停止(暂停/取消)
+    if stop.is_set() and stop_event is not None:
+        return False, name, "已停止"
+
+    if failed[0]:
+        print(f"    ❌ 块失败: {failed[0]}")
+        return False, name, failed[0]
+
+    # 校验
     for i, s, e in jobs:
-        if os.path.getsize(os.path.join(partdir, f"p_{i:05d}")) != (e - s + 1):
-            print(f"    ❌ 块{i}不完整，重跑续传即可"); return False
+        try:
+            if os.path.getsize(os.path.join(partdir, f"p_{i:05d}")) != (e - s + 1):
+                print(f"    ❌ 块{i}不完整，重跑续传即可")
+                return False, name, f"块{i}不完整"
+        except OSError:
+            return False, name, f"块{i}缺失"
+
     print("    合并...")
     with open(out, "wb") as out_f:
         for i in range(nchunks):
@@ -188,7 +247,13 @@ def download_one(fid):
     final, dt = os.path.getsize(out), time.time() - t0
     ok = final == size
     print(f"    {'✅' if ok else '❌'} {fmt(final)}  均速 {fmt(final/dt)}/s  耗时 {fmt_eta(dt)}")
-    log_history(name, size, ok, final, dt)
+    log_history(name, size, ok, final, dt, od)
+    return ok, name, None if ok else "大小不符"
+
+
+def download_one(fid):
+    """CLI 兼容入口，调用 download_task 使用模块默认参数。"""
+    ok, name, err = download_task(fid)
     return ok
 
 
