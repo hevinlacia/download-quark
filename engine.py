@@ -7,12 +7,12 @@
 #   python3 quark_dl.py <fid> [<fid> ...]
 #
 # 库调用:
-#   from quark_dl import download_task
+#   from engine import download_task
 #   ok, name, err = download_task(fid, outdir, cookie, progress_cb=..., stop_event=...)
 import json, os, sys, time, shutil, threading, urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-CONFIG_PATH = os.path.expanduser("~/.config/download-quark/config.json")
+CONFIG_PATH = os.path.expanduser("~/.config/downloader/config.json")
 
 
 def load_config():

@@ -15,7 +15,7 @@ for a in sys.argv[1:]:
     if a.isdigit():
         PORT = int(a)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.expanduser("~/.config/download-quark/config.json")
+CONFIG_PATH = os.path.expanduser("~/.config/downloader/config.json")
 _state = {}
 
 

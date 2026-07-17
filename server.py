@@ -10,7 +10,7 @@ from socketserver import ThreadingMixIn
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 7788
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_DIR = os.path.expanduser("~/.config/download-quark")
+CONFIG_DIR = os.path.expanduser("~/.config/downloader")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 TASKS_PATH = os.path.join(CONFIG_DIR, "tasks.json")
 os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -72,7 +72,7 @@ def _run_worker(task):
     stop_event = worker["stop_event"] if worker else threading.Event()
 
     try:
-        from quark_dl import download_task
+        from engine import download_task
         ok, name, err = download_task(fid, outdir=outdir, cookie=cookie,
                                        progress_cb=progress_cb, stop_event=stop_event)
         with _TASKS_LOCK:
