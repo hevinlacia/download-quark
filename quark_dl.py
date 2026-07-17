@@ -10,14 +10,26 @@
 import json, os, sys, time, shutil, threading, urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-COOKIE = os.environ.get("QUARK_COOKIE", "").strip()
+CONFIG_PATH = os.path.expanduser("~/.config/download-quark/config.json")
+
+
+def load_config():
+    try:
+        with open(CONFIG_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+_CFG = load_config()
+COOKIE = (os.environ.get("QUARK_COOKIE") or _CFG.get("cookie", "")).strip()
 QUARK_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) quark-cloud-drive/2.5.20 "
             "Chrome/100.0.4896.160 Electron/18.3.5.4-b478491100 Safari/537.36 "
             "Channel/pckk_other_ch")
 CHUNK_MB = int(os.environ.get("CHUNK_MB", "100"))
 CONC = int(os.environ.get("CONC", "16"))
-OUTDIR = os.environ.get("OUTDIR") or os.getcwd()
+OUTDIR = os.environ.get("OUTDIR") or _CFG.get("outdir") or os.getcwd()
 
 
 def die(msg):
