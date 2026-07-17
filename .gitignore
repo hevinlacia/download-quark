@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.*.parts/
+.quark_history.jsonl
+*.log
